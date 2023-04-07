@@ -5,6 +5,9 @@ from gymnasium import Env, spaces
 import numpy as np
 from stable_baselines3.common.env_checker import check_env
 
+
+# testing testing 123
+
 @dataclass
 class MyVector3:
     x: float
@@ -31,9 +34,9 @@ class MyEnv(Env):
 
 
     def step(self, action):
-        
+
         action = int(action)    #We need to use int and not np.int64 givent by spaces.Discrete
-      
+
         rl_result : RlResult = self.unity_comms.Step(action=action, ResultClass=RlResult)
         info = {"finished":rl_result.done}
         return np.array(rl_result.obs, dtype=np.uint8), rl_result.reward, rl_result.done, False, info
@@ -42,14 +45,14 @@ class MyEnv(Env):
         reset_res = self.unity_comms.Reset(ResultClass=ImageObs)
         return np.array(reset_res.obs, dtype=np.uint8), {}
 
-    
+
 
 
 def run(args: argparse.Namespace) -> None:
     unity_comms = UnityComms(port = 9000)
     my_env = MyEnv(unity_comms=unity_comms)
     check_env(env=my_env)
-    
+
 
 
 if __name__ == "__main__":
