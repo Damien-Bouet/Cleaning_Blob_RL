@@ -40,8 +40,8 @@ import tensorflow as tf
 from tensorboardX import SummaryWriter
 #tf.config.experimental_run_functions_eagerly(True) # used for debuging and development
 tf.compat.v1.disable_eager_execution() # usually using this for fastest performance
-from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Input, Dense
+from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D, Sequential,LeakyReLU ,Flatten
 from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras import backend as K
 import copy
@@ -88,15 +88,15 @@ class Environment(Process):
 
 class Actor_Model:
     def __init__(self, input_shape, action_space, lr, optimizer):
-        X_input = Input(input_shape)
         self.action_space = action_space
 
-        X = Dense(512, activation="relu", kernel_initializer=tf.random_normal_initializer(stddev=0.01))(X_input)
-        X = Dense(256, activation="relu", kernel_initializer=tf.random_normal_initializer(stddev=0.01))(X)
-        X = Dense(64, activation="relu", kernel_initializer=tf.random_normal_initializer(stddev=0.01))(X)
-        output = Dense(self.action_space, activation="softmax")(X)
+        model = Sequential()
+        model.add(Conv2D(16, (3, 3), activation='relu', stride=1, input_shape=(32, 24, 3)))
+        model.add(LeakyReLU(alpha=0.01))
+        model.Flatten()
+        model.add(Dense(self.action_space, activation="softmax"))
 
-        self.Actor = Model(inputs = X_input, outputs = output)
+        self.Actor = model
         self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
 
     def ppo_loss(self, y_true, y_pred):
@@ -131,16 +131,16 @@ class Actor_Model:
 
 class Critic_Model:
     def __init__(self, input_shape, action_space, lr, optimizer):
-        X_input = Input(input_shape)
-        old_values = Input(shape=(1,))
+        self.action_space = action_space
 
-        V = Dense(512, activation="relu", kernel_initializer='he_uniform')(X_input)
-        V = Dense(256, activation="relu", kernel_initializer='he_uniform')(V)
-        V = Dense(64, activation="relu", kernel_initializer='he_uniform')(V)
-        value = Dense(1, activation=None)(V)
+        model = Sequential()
+        model.add(Conv2D(16, (3, 3), activation='relu', stride=1, input_shape=(32, 24, 3)))
+        model.add(LeakyReLU(alpha=0.01))
+        model.Flatten()
+        model.add(Dense(1, activation="linear"))
 
-        self.Critic = Model(inputs=[X_input, old_values], outputs = value)
-        self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=optimizer(lr=lr))
+        self.Actor = model
+        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
 
     def critic_PPO2_loss(self, values):
         def loss(y_true, y_pred):
@@ -484,3 +484,4 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=9000)
     args = parser.parse_args()
     run(args)
+
