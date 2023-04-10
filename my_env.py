@@ -24,6 +24,11 @@ class RlResult:
 class ImageObs:
     obs: list
 
+@dataclass
+class RlReset:
+    obs: list
+    total_reward_available: float
+
 class MyEnv(Env):
     def __init__(self, unity_comms: UnityComms):
         super().__init__()
@@ -42,11 +47,11 @@ class MyEnv(Env):
         return np.array(rl_result.obs, dtype=np.uint8), rl_result.reward, rl_result.done, False, info
 
     def reset(self):
-        reset_res = self.unity_comms.Reset(ResultClass=ImageObs)
-        return np.array(reset_res.obs, dtype=np.uint8), {}
-
-
-
+        reset_res = self.unity_comms.Reset(ResultClass=RlReset)
+        obs = np.array(reset_res.obs, dtype=np.uint8)
+        self.total_reward = reset_res.total_reward_available
+        return obs, {}
+        
 
 def run(args: argparse.Namespace) -> None:
     unity_comms = UnityComms(port = 9000)

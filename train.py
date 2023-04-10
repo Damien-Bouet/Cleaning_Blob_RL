@@ -29,7 +29,7 @@ import gym
 import pylab
 import numpy as np
 import tensorflow as tf
-from tensorboardX import SummaryWriter
+# from tensorboard import File
 #tf.config.experimental_run_functions_eagerly(True) # used for debuging and development
 tf.compat.v1.disable_eager_execution() # usually using this for fastest performance
 from tensorflow.keras.models import load_model, Model
@@ -157,6 +157,8 @@ class Critic_Model:
     def predict(self, state):
         return self.Critic.predict([state/255, np.zeros((state.shape[0], 1))])
 
+tf_writer = tf.summary.create_file_writer("log")
+
 class PPOAgent:
     # PPO Main Optimization Algorithm
     def __init__(self, env):
@@ -177,10 +179,10 @@ class PPOAgent:
         self.optimizer = Adam
 
         self.replay_count = 0
-        self.writer = SummaryWriter(comment="_blob_"+self.optimizer.__name__+"_"+str(self.lr))
-        self.tf_writer = tf.summary.create_file_writer(logdir="/log")
+        # self.writer = SummaryWriter(comment="_blob_"+self.optimizer.__name__+"_"+str(self.lr))
         
-        # Instantiate plot memory
+        
+        # Instantiate plot memoryf
         self.scores_, self.episodes_, self.average_ = [], [], [] # used in matplotlib plots
 
         # Create Actor-Critic network models
@@ -189,6 +191,7 @@ class PPOAgent:
         
         self.Actor_name = f"{self.env_name}_PPO_Actor.h5"
         self.Critic_name = f"{self.env_name}_PPO_Critic.h5"
+        # self.load();
 
         
     def act(self, state):
@@ -266,8 +269,8 @@ class PPOAgent:
         a_loss = self.Actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
         c_loss = self.Critic.Critic.fit([states/255, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
 
-        self.writer.add_scalar('Data/actor_loss_per_replay', np.sum(a_loss.history['loss']), self.replay_count)
-        self.writer.add_scalar('Data/critic_loss_per_replay', np.sum(c_loss.history['loss']), self.replay_count)
+        # self.writer.add_scalar('Data/actor_loss_per_replay', np.sum(a_loss.history['loss']), self.replay_count)
+        # self.writer.add_scalar('Data/critic_loss_per_replay', np.sum(c_loss.history['loss']), self.replay_count)
         self.replay_count += 1
  
     def load(self):
@@ -281,7 +284,7 @@ class PPOAgent:
     pylab.figure(figsize=(18, 9))
     pylab.subplots_adjust(left=0.05, right=0.98, top=0.96, bottom=0.06)
     def PlotModel(self, score, episode):
-        self.scores_.append(score)
+        self.scores_.append(score/self.env.total_reward)
         self.episodes_.append(episode)
         self.average_.append(sum(self.scores_[-50:]) / len(self.scores_[-50:]))
         if str(episode)[-2:] == "00":# much faster than episode % 100
@@ -374,17 +377,17 @@ class PPOAgent:
                 state = next_state
                 score += reward
                 if done and self.episode % printing_period == 0:
-                    with self.tf_writer.as_default():
-                        tf.summary.scalar(name="reward", data=reward, step=step)
-                        dqn_variable = reward
-                        tf.summary.histogram(name="agent_rewards", data=tf.convert_to_tensor(dqn_variable), step=step)
-                        self.tf_writer.flush()
+                
+                    tf.summary.scalar(name="reward", data=reward, step=step)
+                    # dqn_variable = reward
+                    # tf.summary.histogram(name="agent_rewards", data=tf.convert_to_tensor(dqn_variable), step=step)
+                    tf_writer.flush()
 
                     self.episode += 1
                     average, SAVING = self.PlotModel(score, self.episode)
                     print("episode: {}/{}, step: {}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, step, score, average, SAVING))
-                    self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
-                    self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
+                    # self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
+                    # self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
 
                     state, done, score, SAVING = self.env.reset()[0], False, 0, ''
             
@@ -468,7 +471,7 @@ class PPOAgent:
     def test(self, test_episodes = 100):
         self.load()
         for e in range(100):
-            state = self.env.reset()
+            state = self.env.reset()[0]
             state = np.reshape(state, [1, self.state_size[0]])
             done = False
             score = 0
@@ -488,7 +491,8 @@ def run(args: argparse.Namespace) -> None:
     unity_comms = UnityComms(port = 9000)
     my_env = MyEnv(unity_comms=unity_comms)
     agent = PPOAgent(my_env)
-    agent.run_batch()
+    with tf_writer.as_default():
+        agent.run_batch()
 
 
 if __name__ == "__main__":
