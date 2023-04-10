@@ -178,6 +178,7 @@ class PPOAgent:
 
         self.replay_count = 0
         self.writer = SummaryWriter(comment="_blob_"+self.optimizer.__name__+"_"+str(self.lr))
+        self.tf_writer = tf.summary.create_file_writer(logdir="/log")
         
         # Instantiate plot memory
         self.scores_, self.episodes_, self.average_ = [], [], [] # used in matplotlib plots
@@ -262,8 +263,8 @@ class PPOAgent:
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
         # training Actor and Critic networks
-        a_loss = self.Actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle, callbacks=[tensorboard_callback])
-        c_loss = self.Critic.Critic.fit([states/255, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle, callbacks=[tensorboard_callback])
+        a_loss = self.Actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
+        c_loss = self.Critic.Critic.fit([states/255, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
 
         self.writer.add_scalar('Data/actor_loss_per_replay', np.sum(a_loss.history['loss']), self.replay_count)
         self.writer.add_scalar('Data/critic_loss_per_replay', np.sum(c_loss.history['loss']), self.replay_count)
@@ -373,6 +374,12 @@ class PPOAgent:
                 state = next_state
                 score += reward
                 if done and self.episode % printing_period == 0:
+                    with self.tf_writer.as_default():
+                        tf.summary.scalar(name="reward", data=reward, step=step)
+                        dqn_variable = reward
+                        tf.summary.histogram(name="agent_rewards", data=tf.convert_to_tensor(dqn_variable), step=step)
+                        self.tf_writer.flush()
+
                     self.episode += 1
                     average, SAVING = self.PlotModel(score, self.episode)
                     print("episode: {}/{}, step: {}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, step, score, average, SAVING))
