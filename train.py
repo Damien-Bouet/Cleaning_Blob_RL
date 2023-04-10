@@ -5,14 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from gymnasium import spaces
-from stable_baselines3.ppo.ppo import PPO
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.policies import CnnLstmPolicy
-from stable_baselines3.common.monitor import Monitor
-import torch as th
-import torch.nn as nn
-
-
 
 from my_env import MyEnv
 
@@ -40,8 +32,9 @@ import tensorflow as tf
 from tensorboardX import SummaryWriter
 #tf.config.experimental_run_functions_eagerly(True) # used for debuging and development
 tf.compat.v1.disable_eager_execution() # usually using this for fastest performance
-from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D, Sequential,LeakyReLU ,Flatten
+from tensorflow.keras.models import load_model, Model
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D,LeakyReLU ,Flatten, Input
 from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras import backend as K
 import copy
@@ -91,13 +84,14 @@ class Actor_Model:
         self.action_space = action_space
 
         model = Sequential()
-        model.add(Conv2D(16, (3, 3), activation='relu', stride=1, input_shape=(32, 24, 3)))
+        model.add(Conv2D(16, (3, 3), activation='relu', strides=(1, 1), input_shape=(24, 32, 1)))
         model.add(LeakyReLU(alpha=0.01))
-        model.Flatten()
+        model.add(Flatten())
         model.add(Dense(self.action_space, activation="softmax"))
 
         self.Actor = model
-        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
+        # self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
+        self.Actor.compile(loss=self.ppo_loss, optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr))
 
     def ppo_loss(self, y_true, y_pred):
         # Defined in https://arxiv.org/abs/1707.06347
@@ -131,16 +125,18 @@ class Actor_Model:
 
 class Critic_Model:
     def __init__(self, input_shape, action_space, lr, optimizer):
-        self.action_space = action_space
+        X_input = Input(input_shape)
+        old_values = Input(shape=(1,))
 
-        model = Sequential()
-        model.add(Conv2D(16, (3, 3), activation='relu', stride=1, input_shape=(32, 24, 3)))
-        model.add(LeakyReLU(alpha=0.01))
-        model.Flatten()
-        model.add(Dense(1, activation="linear"))
+        V = Conv2D(16, (3, 3), activation='relu', strides=(1, 1), input_shape=(24, 32, 1))(X_input)
+        V = LeakyReLU(alpha=0.01)(V)
+        V = Flatten()(V)
+        value = Dense(1, activation=None)(V)
 
-        self.Actor = model
-        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
+        self.Critic = Model(inputs=[X_input, old_values], outputs = value)
+        # self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=optimizer(lr=lr))
+        self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr))
+
 
     def critic_PPO2_loss(self, values):
         def loss(y_true, y_pred):
@@ -163,6 +159,7 @@ class PPOAgent:
         # Initialization
         # Environment and PPO parameters    
         self.env = env
+        self.env_name = "cleaning_blob"
         self.action_size = self.env.action_space.n
         self.state_size = self.env.observation_space.shape
         self.EPISODES = 10000 # total episodes to train through all environments
@@ -171,12 +168,12 @@ class PPOAgent:
         self.lr = 0.00025
         self.epochs = 10 # training epochs
         self.shuffle=False
-        self.Training_batch = 1000
+        self.Training_batch = 200
         #self.optimizer = RMSprop
         self.optimizer = Adam
 
         self.replay_count = 0
-        self.writer = SummaryWriter(comment="_"+self.env_name+"_"+self.optimizer.__name__+"_"+str(self.lr))
+        self.writer = SummaryWriter(comment="_blob_"+self.optimizer.__name__+"_"+str(self.lr))
         
         # Instantiate plot memory
         self.scores_, self.episodes_, self.average_ = [], [], [] # used in matplotlib plots
@@ -198,6 +195,7 @@ class PPOAgent:
         """
         # Use the network to predict the next action to take, using the model
         prediction = self.Actor.predict(state)[0]
+        print(prediction)
         action = np.random.choice(self.action_size, p=prediction)
         action_onehot = np.zeros([self.action_size])
         action_onehot[action] = 1
@@ -231,8 +229,8 @@ class PPOAgent:
 
     def replay(self, states, actions, rewards, predictions, dones, next_states):
         # reshape memory to appropriate shape for training
-        states = np.vstack(states)
-        next_states = np.vstack(next_states)
+        # states = np.vstack(states)
+        # next_states = np.vstack(next_states)
         actions = np.vstack(actions)
         predictions = np.vstack(predictions)
 
@@ -304,78 +302,79 @@ class PPOAgent:
 
         return self.average_[-1], SAVING
     
-    def run(self): # train only when episode is finished
-        state = self.env.reset()
-        state = np.reshape(state, [1, self.state_size[0]])
-        done, score, SAVING = False, 0, ''
-        while True:
-            # Instantiate or reset games memory
-            states, next_states, actions, rewards, predictions, dones = [], [], [], [], [], []
-            while not done:
-                self.env.render()
-                # Actor picks an action
-                action, action_onehot, prediction = self.act(state)
-                # Retrieve new state, reward, and whether the state is terminal
-                next_state, reward, done, _ = self.env.step(action)
-                # Memorize (state, action, reward) for training
-                states.append(state)
-                next_states.append(np.reshape(next_state, [1, self.state_size[0]]))
-                actions.append(action_onehot)
-                rewards.append(reward)
-                dones.append(done)
-                predictions.append(prediction)
-                # Update current state
-                state = np.reshape(next_state, [1, self.state_size[0]])
-                score += reward
-                if done:
-                    self.episode += 1
-                    average, SAVING = self.PlotModel(score, self.episode)
-                    print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
-                    self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
-                    self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
+    # def run(self): # train only when episode is finished
+    #     state = self.env.reset()
+    #     done, score, SAVING = False, 0, ''
+    #     while True:
+    #         # Instantiate or reset games memory
+    #         states, next_states, actions, rewards, predictions, dones = [], [], [], [], [], []
+    #         while not done:
+    #             self.env.render()
+    #             # Actor picks an action
+    #             action, action_onehot, prediction = self.act(state)
+    #             # Retrieve new state, reward, and whether the state is terminal
+    #             next_state, reward, done, _ = self.env.step(action)
+    #             # Memorize (state, action, reward) for training
+    #             states.append(state)
+    #             next_states.append(next_state)
+    #             actions.append(action_onehot)
+    #             rewards.append(reward)
+    #             dones.append(done)
+    #             predictions.append(prediction)
+    #             # Update current state
+    #             state = next_state
+    #             score += reward
+    #             if done:
+    #                 self.episode += 1
+    #                 average, SAVING = self.PlotModel(score, self.episode)
+    #                 print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
+    #                 self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
+    #                 self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
                     
-                    self.replay(states, actions, rewards, predictions, dones, next_states)
+    #                 self.replay(states, actions, rewards, predictions, dones, next_states)
 
-                    state, done, score, SAVING = self.env.reset(), False, 0, ''
-                    state = np.reshape(state, [1, self.state_size[0]])
+    #                 state, done, score, SAVING = self.env.reset(), False, 0, ''
 
-            if self.episode >= self.EPISODES:
-                break
-        self.env.close()
+    #         if self.episode >= self.EPISODES:
+    #             break
+    #     self.env.close()
 
     def run_batch(self): # train every self.Training_batch episodes
-        state = self.env.reset()
-        state = np.reshape(state, [1, self.state_size[0]])
+        state = self.env.reset()[0]
+        step = 0
+        printing_period = 1
+        
         done, score, SAVING = False, 0, ''
         while True:
             # Instantiate or reset games memory
-            states, next_states, actions, rewards, predictions, dones = [], [], [], [], [], []
+            states, next_states, actions, rewards, predictions, dones = np.zeros((self.Training_batch,24,32,1)), np.zeros((self.Training_batch,24,32,1)), [], [], [], []
             for t in range(self.Training_batch):
-                self.env.render()
+                # self.env.render()
                 # Actor picks an action
-                action, action_onehot, prediction = self.act(state)
+                action, action_onehot, prediction = self.act(np.expand_dims(state, axis=0))
                 # Retrieve new state, reward, and whether the state is terminal
-                next_state, reward, done, _ = self.env.step(action)
+                
+                next_state, reward, done, _, _ = self.env.step(action)
+                step += 1
                 # Memorize (state, action, reward) for training
-                states.append(state)
-                next_states.append(np.reshape(next_state, [1, self.state_size[0]]))
+                states[t,:,:,:] = state
+                next_states[t,:,:,:] = next_state
                 actions.append(action_onehot)
                 rewards.append(reward)
                 dones.append(done)
                 predictions.append(prediction)
                 # Update current state
-                state = np.reshape(next_state, [1, self.state_size[0]])
+                state = next_state
                 score += reward
-                if done:
+                if done and self.episode % printing_period == 0:
                     self.episode += 1
                     average, SAVING = self.PlotModel(score, self.episode)
-                    print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
+                    print("episode: {}/{}, step: {}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, step, score, average, SAVING))
                     self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
                     self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
 
-                    state, done, score, SAVING = self.env.reset(), False, 0, ''
-                    state = np.reshape(state, [1, self.state_size[0]])
-                    
+                    state, done, score, SAVING = self.env.reset()[0], False, 0, ''
+            
             self.replay(states, actions, rewards, predictions, dones, next_states)
             if self.episode >= self.EPISODES:
                 break
