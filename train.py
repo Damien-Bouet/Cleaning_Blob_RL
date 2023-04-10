@@ -38,6 +38,7 @@ from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D,LeakyReLU ,Flatte
 from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras import backend as K
 import copy
+import datetime
 
 from threading import Thread, Lock
 from multiprocessing import Process, Pipe
@@ -49,34 +50,34 @@ if len(gpus) > 0:
     try: tf.config.experimental.set_memory_growth(gpus[0], True)
     except RuntimeError: pass
 
-class Environment(Process):
-    def __init__(self, env_idx, child_conn, env_name, state_size, action_size, visualize=False):
-        super(Environment, self).__init__()
-        self.env = gym.make(env_name)
-        self.is_render = visualize
-        self.env_idx = env_idx
-        self.child_conn = child_conn
-        self.state_size = state_size
-        self.action_size = action_size
+# class Environment(Process):
+#     def __init__(self, env_idx, child_conn, env_name, state_size, action_size, visualize=False):
+#         super(Environment, self).__init__()
+#         self.env = gym.make(env_name)
+#         self.is_render = visualize
+#         self.env_idx = env_idx
+#         self.child_conn = child_conn
+#         self.state_size = state_size
+#         self.action_size = action_size
 
-    def run(self):
-        super(Environment, self).run()
-        state = self.env.reset()
-        state = np.reshape(state, [1, self.state_size])
-        self.child_conn.send(state)
-        while True:
-            action = self.child_conn.recv()
-            if self.is_render and self.env_idx == 0:
-                self.env.render()
+#     def run(self):
+#         super(Environment, self).run()
+#         state = self.env.reset()
+#         state = np.reshape(state, [1, self.state_size])
+#         self.child_conn.send(state)
+#         while True:
+#             action = self.child_conn.recv()
+#             if self.is_render and self.env_idx == 0:
+#                 self.env.render()
 
-            state, reward, done, info = self.env.step(action)
-            state = np.reshape(state, [1, self.state_size])
+#             state, reward, done, info = self.env.step(action)
+#             state = np.reshape(state, [1, self.state_size])
 
-            if done:
-                state = self.env.reset()
-                state = np.reshape(state, [1, self.state_size])
+#             if done:
+#                 state = self.env.reset()
+#                 state = np.reshape(state, [1, self.state_size])
 
-            self.child_conn.send([state, reward, done, info])
+#             self.child_conn.send([state, reward, done, info])
 
 
 class Actor_Model:
@@ -90,9 +91,12 @@ class Actor_Model:
         model.add(Dense(self.action_space, activation="softmax"))
 
         self.Actor = model
+
+        
+
         # self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
         self.Actor.compile(loss=self.ppo_loss, optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr))
-
+        
     def ppo_loss(self, y_true, y_pred):
         # Defined in https://arxiv.org/abs/1707.06347
         advantages, prediction_picks, actions = y_true[:, :1], y_true[:, 1:1+self.action_space], y_true[:, 1+self.action_space:]
@@ -120,7 +124,7 @@ class Actor_Model:
         return total_loss
 
     def predict(self, state):
-        return self.Actor.predict(state)
+        return self.Actor.predict(state/255)
 
 
 class Critic_Model:
@@ -151,7 +155,7 @@ class Critic_Model:
         return loss
 
     def predict(self, state):
-        return self.Critic.predict([state, np.zeros((state.shape[0], 1))])
+        return self.Critic.predict([state/255, np.zeros((state.shape[0], 1))])
 
 class PPOAgent:
     # PPO Main Optimization Algorithm
@@ -195,7 +199,6 @@ class PPOAgent:
         """
         # Use the network to predict the next action to take, using the model
         prediction = self.Actor.predict(state)[0]
-        print(prediction)
         action = np.random.choice(self.action_size, p=prediction)
         action_onehot = np.zeros([self.action_size])
         action_onehot[action] = 1
@@ -255,9 +258,12 @@ class PPOAgent:
         # in custom PPO loss function we unpack it
         y_true = np.hstack([advantages, predictions, actions])
         
+        log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
         # training Actor and Critic networks
-        a_loss = self.Actor.Actor.fit(states, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
-        c_loss = self.Critic.Critic.fit([states, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
+        a_loss = self.Actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle, callbacks=[tensorboard_callback])
+        c_loss = self.Critic.Critic.fit([states/255, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle, callbacks=[tensorboard_callback])
 
         self.writer.add_scalar('Data/actor_loss_per_replay', np.sum(a_loss.history['loss']), self.replay_count)
         self.writer.add_scalar('Data/critic_loss_per_replay', np.sum(c_loss.history['loss']), self.replay_count)
@@ -381,75 +387,75 @@ class PPOAgent:
         self.env.close()  
 
         
-    def run_multiprocesses(self, num_worker = 4):
-        works, parent_conns, child_conns = [], [], []
-        for idx in range(num_worker):
-            parent_conn, child_conn = Pipe()
-            work = Environment(idx, child_conn, self.env_name, self.state_size[0], self.action_size, True)
-            work.start()
-            works.append(work)
-            parent_conns.append(parent_conn)
-            child_conns.append(child_conn)
+    # def run_multiprocesses(self, num_worker = 4):
+    #     works, parent_conns, child_conns = [], [], []
+    #     for idx in range(num_worker):
+    #         parent_conn, child_conn = Pipe()
+    #         work = Environment(idx, child_conn, self.env_name, self.state_size[0], self.action_size, True)
+    #         work.start()
+    #         works.append(work)
+    #         parent_conns.append(parent_conn)
+    #         child_conns.append(child_conn)
 
-        states =        [[] for _ in range(num_worker)]
-        next_states =   [[] for _ in range(num_worker)]
-        actions =       [[] for _ in range(num_worker)]
-        rewards =       [[] for _ in range(num_worker)]
-        dones =         [[] for _ in range(num_worker)]
-        predictions =   [[] for _ in range(num_worker)]
-        score =         [0 for _ in range(num_worker)]
+    #     states =        [[] for _ in range(num_worker)]
+    #     next_states =   [[] for _ in range(num_worker)]
+    #     actions =       [[] for _ in range(num_worker)]
+    #     rewards =       [[] for _ in range(num_worker)]
+    #     dones =         [[] for _ in range(num_worker)]
+    #     predictions =   [[] for _ in range(num_worker)]
+    #     score =         [0 for _ in range(num_worker)]
 
-        state = [0 for _ in range(num_worker)]
-        for worker_id, parent_conn in enumerate(parent_conns):
-            state[worker_id] = parent_conn.recv()
+    #     state = [0 for _ in range(num_worker)]
+    #     for worker_id, parent_conn in enumerate(parent_conns):
+    #         state[worker_id] = parent_conn.recv()
 
-        while self.episode < self.EPISODES:
-            predictions_list = self.Actor.predict(np.reshape(state, [num_worker, self.state_size[0]]))
-            actions_list = [np.random.choice(self.action_size, p=i) for i in predictions_list]
+    #     while self.episode < self.EPISODES:
+    #         predictions_list = self.Actor.predict(np.reshape(state, [num_worker, self.state_size[0]]))
+    #         actions_list = [np.random.choice(self.action_size, p=i) for i in predictions_list]
 
-            for worker_id, parent_conn in enumerate(parent_conns):
-                parent_conn.send(actions_list[worker_id])
-                action_onehot = np.zeros([self.action_size])
-                action_onehot[actions_list[worker_id]] = 1
-                actions[worker_id].append(action_onehot)
-                predictions[worker_id].append(predictions_list[worker_id])
+    #         for worker_id, parent_conn in enumerate(parent_conns):
+    #             parent_conn.send(actions_list[worker_id])
+    #             action_onehot = np.zeros([self.action_size])
+    #             action_onehot[actions_list[worker_id]] = 1
+    #             actions[worker_id].append(action_onehot)
+    #             predictions[worker_id].append(predictions_list[worker_id])
 
-            for worker_id, parent_conn in enumerate(parent_conns):
-                next_state, reward, done, _ = parent_conn.recv()
+    #         for worker_id, parent_conn in enumerate(parent_conns):
+    #             next_state, reward, done, _ = parent_conn.recv()
 
-                states[worker_id].append(state[worker_id])
-                next_states[worker_id].append(next_state)
-                rewards[worker_id].append(reward)
-                dones[worker_id].append(done)
-                state[worker_id] = next_state
-                score[worker_id] += reward
+    #             states[worker_id].append(state[worker_id])
+    #             next_states[worker_id].append(next_state)
+    #             rewards[worker_id].append(reward)
+    #             dones[worker_id].append(done)
+    #             state[worker_id] = next_state
+    #             score[worker_id] += reward
 
-                if done:
-                    average, SAVING = self.PlotModel(score[worker_id], self.episode)
-                    print("episode: {}/{}, worker: {}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, worker_id, score[worker_id], average, SAVING))
-                    self.writer.add_scalar(f'Workers:{num_worker}/score_per_episode', score[worker_id], self.episode)
-                    self.writer.add_scalar(f'Workers:{num_worker}/learning_rate', self.lr, self.episode)
-                    score[worker_id] = 0
-                    if(self.episode < self.EPISODES):
-                        self.episode += 1
+    #             if done:
+    #                 average, SAVING = self.PlotModel(score[worker_id], self.episode)
+    #                 print("episode: {}/{}, worker: {}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, worker_id, score[worker_id], average, SAVING))
+    #                 self.writer.add_scalar(f'Workers:{num_worker}/score_per_episode', score[worker_id], self.episode)
+    #                 self.writer.add_scalar(f'Workers:{num_worker}/learning_rate', self.lr, self.episode)
+    #                 score[worker_id] = 0
+    #                 if(self.episode < self.EPISODES):
+    #                     self.episode += 1
                         
-            for worker_id in range(num_worker):
-                if len(states[worker_id]) >= self.Training_batch:
-                    self.replay(states[worker_id], actions[worker_id], rewards[worker_id], predictions[worker_id], dones[worker_id], next_states[worker_id])
+    #         for worker_id in range(num_worker):
+    #             if len(states[worker_id]) >= self.Training_batch:
+    #                 self.replay(states[worker_id], actions[worker_id], rewards[worker_id], predictions[worker_id], dones[worker_id], next_states[worker_id])
                     
-                    states[worker_id] = []
-                    next_states[worker_id] = []
-                    actions[worker_id] = []
-                    rewards[worker_id] = []
-                    dones[worker_id] = []
-                    predictions[worker_id] = []
+    #                 states[worker_id] = []
+    #                 next_states[worker_id] = []
+    #                 actions[worker_id] = []
+    #                 rewards[worker_id] = []
+    #                 dones[worker_id] = []
+    #                 predictions[worker_id] = []
 
-        # terminating processes after while loop
-        works.append(work)
-        for work in works:
-            work.terminate()
-            print('TERMINATED:', work)
-            work.join()
+    #     # terminating processes after while loop
+    #     works.append(work)
+    #     for work in works:
+    #         work.terminate()
+    #         print('TERMINATED:', work)
+    #         work.join()
             
 
     def test(self, test_episodes = 100):
