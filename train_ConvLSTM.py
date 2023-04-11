@@ -29,12 +29,14 @@ import gym
 import pylab
 import numpy as np
 import tensorflow as tf
+
 # from tensorboard import File
 #tf.config.experimental_run_functions_eagerly(True) # used for debuging and development
 tf.compat.v1.disable_eager_execution() # usually using this for fastest performance
-from tensorflow.keras.models import load_model, Model
+from tensorflow.keras import models
+# from tensorflow.keras.models import load_model, Model
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D,LeakyReLU ,Flatten, Input
+from tensorflow.keras.layers import Conv2D, Dense,MaxPooling2D,LeakyReLU ,Flatten, Input, ConvLSTM2D, BatchNormalization
 from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras import backend as K
 import copy
@@ -43,6 +45,8 @@ import datetime
 from threading import Thread, Lock
 from multiprocessing import Process, Pipe
 import time
+
+tf.compat.v1.experimental.output_all_intermediates(True)
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if len(gpus) > 0:
@@ -85,17 +89,18 @@ class Actor_Model:
         self.action_space = action_space
 
         model = Sequential()
-        model.add(Conv2D(16, (3, 3), activation='relu', strides=(1, 1), input_shape=(24, 32, 1)))
-        model.add(LeakyReLU(alpha=0.01))
+        model.add(ConvLSTM2D(filters=16, kernel_size=(3, 3),
+                    input_shape=(1, 24, 32, 1),
+                    activation="relu",
+                    padding='same', return_sequences=True))
+
         model.add(Flatten())
         model.add(Dense(self.action_space, activation="softmax"))
 
         self.Actor = model
 
-        
-
         # self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))
-        self.Actor.compile(loss=self.ppo_loss, optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr))
+        self.Actor.compile(loss=self.ppo_loss, optimizer=tf.keras.optimizers.Adam(learning_rate=lr))
         
     def ppo_loss(self, y_true, y_pred):
         # Defined in https://arxiv.org/abs/1707.06347
@@ -132,14 +137,16 @@ class Critic_Model:
         X_input = Input(input_shape)
         old_values = Input(shape=(1,))
 
-        V = Conv2D(16, (3, 3), activation='relu', strides=(1, 1), input_shape=(24, 32, 1))(X_input)
-        V = LeakyReLU(alpha=0.01)(V)
+        V = ConvLSTM2D(filters=16, kernel_size=(3, 3),
+                    input_shape=(1, 24, 32, 1),
+                    activation="relu",
+                    padding='same', return_sequences=True)(X_input)
         V = Flatten()(V)
         value = Dense(1, activation=None)(V)
 
-        self.Critic = Model(inputs=[X_input, old_values], outputs = value)
+        self.Critic = models.Model(inputs=[X_input, old_values], outputs = value)
         # self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=optimizer(lr=lr))
-        self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=lr))
+        self.Critic.compile(loss=[self.critic_PPO2_loss(old_values)], optimizer=tf.keras.optimizers.Adam(learning_rate=lr))
 
 
     def critic_PPO2_loss(self, values):
@@ -157,7 +164,7 @@ class Critic_Model:
     def predict(self, state):
         return self.Critic.predict([state/255, np.zeros((state.shape[0], 1))])
 
-tf_writer = tf.summary.create_file_writer("log")
+# tf_writer = tf.summary.create_file_writer("log")
 
 class PPOAgent:
     # PPO Main Optimization Algorithm
@@ -167,7 +174,7 @@ class PPOAgent:
         self.env = env
         self.env_name = "cleaning_blob"
         self.action_size = self.env.action_space.n
-        self.state_size = self.env.observation_space.shape
+        self.state_size = (1,24,32,1)
         self.EPISODES = 10000 # total episodes to train through all environments
         self.episode = 0 # used to track the episodes total count of episodes played through all thread environments
         self.max_average = 0 # when average score is above 0 model will be saved
@@ -202,7 +209,7 @@ class PPOAgent:
         result>>> 1, because it have the highest probability to be taken
         """
         # Use the network to predict the next action to take, using the model
-        prediction = self.Actor.predict(state)[0]
+        prediction = self.Actor.predict(np.expand_dims(state, axis=(0,1)))[0]
         action = np.random.choice(self.action_size, p=prediction)
         action_onehot = np.zeros([self.action_size])
         action_onehot[action] = 1
@@ -242,8 +249,8 @@ class PPOAgent:
         predictions = np.vstack(predictions)
 
         # Get Critic network predictions 
-        values = self.Critic.predict(states)
-        next_values = self.Critic.predict(next_states)
+        values = self.Critic.predict(np.expand_dims(states, axis=1))
+        next_values = self.Critic.predict(np.expand_dims(next_states, axis=1))
 
         # Compute discounted rewards and advantages
         #discounted_r = self.discount_rewards(rewards)
@@ -266,8 +273,8 @@ class PPOAgent:
         tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
         # training Actor and Critic networks
-        a_loss = self.Actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
-        c_loss = self.Critic.Critic.fit([states/255, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
+        a_loss = self.Actor.Actor.fit(np.expand_dims(np.array(states/255), axis=1), y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
+        c_loss = self.Critic.Critic.fit([np.expand_dims(np.array(states/255), axis=1), values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
 
         # self.writer.add_scalar('Data/actor_loss_per_replay', np.sum(a_loss.history['loss']), self.replay_count)
         # self.writer.add_scalar('Data/critic_loss_per_replay', np.sum(c_loss.history['loss']), self.replay_count)
@@ -361,7 +368,7 @@ class PPOAgent:
             for t in range(self.Training_batch):
                 # self.env.render()
                 # Actor picks an action
-                action, action_onehot, prediction = self.act(np.expand_dims(state, axis=0))
+                action, action_onehot, prediction = self.act(state)
                 # Retrieve new state, reward, and whether the state is terminal
                 
                 next_state, reward, done, _, _ = self.env.step(action)
@@ -381,7 +388,7 @@ class PPOAgent:
                     tf.summary.scalar(name="reward", data=reward, step=step)
                     # dqn_variable = reward
                     # tf.summary.histogram(name="agent_rewards", data=tf.convert_to_tensor(dqn_variable), step=step)
-                    tf_writer.flush()
+                    # tf_writer.flush()
 
                     self.episode += 1
                     average, SAVING = self.PlotModel(score, self.episode)
@@ -477,7 +484,7 @@ class PPOAgent:
             score = 0
             while not done:
                 self.env.render()
-                action = np.argmax(self.Actor.predict(state)[0])
+                action = np.argmax(self.Actor.predict(np.expand_dims(state, axis=(0,1)))[0])
                 state, reward, done, _ = self.env.step(action)
                 state = np.reshape(state, [1, self.state_size[0]])
                 score += reward
@@ -486,13 +493,14 @@ class PPOAgent:
                     break
         self.env.close()
 
+# with tf_writer.as_default():
 
 def run(args: argparse.Namespace) -> None:
     unity_comms = UnityComms(port = 9000)
     my_env = MyEnv(unity_comms=unity_comms)
     agent = PPOAgent(my_env)
-    with tf_writer.as_default():
-        agent.run_batch()
+    
+    agent.run_batch()
 
 
 if __name__ == "__main__":
