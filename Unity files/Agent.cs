@@ -96,7 +96,7 @@ public class Agent : MonoBehaviour
     Rpc rpc;
     Simulation simulation;
 
-    int alga_remaining;
+    public static int alga_remaining;
     int alga_init_count;
     float reward;
     bool done;
@@ -140,13 +140,18 @@ public class Agent : MonoBehaviour
     public int resWidth = 128;
     public int resHeight = 128;
     private int step;
-    public int max_step = 1000;
+    public int max_step = 10000;
+
+    public float gravity_force = 0.01f;
+    private Vector3 gravity_direction;
+    private Rigidbody _rigidbody;
+
 
     // Start is called before the first frame update
     void Start()
     {
         simulation = GetComponent<Simulation>();
-
+        _rigidbody = GetComponent<Rigidbody>();
         if(cam.targetTexture == null){
             cam.targetTexture = new RenderTexture(resWidth, resHeight,0);
         }
@@ -174,10 +179,20 @@ public class Agent : MonoBehaviour
                 break;
         }
 
-        simulation.Simulate();
+        if(Mathf.Abs(transform.position.x) > 20){
+            gravity_direction = new Vector3(transform.position.x - 20*Mathf.Sign(transform.position.x),transform.position.y,transform.position.z);
+        }
+        else{
+            gravity_direction = new Vector3(0,transform.position.y,transform.position.z);
+        }
+        gravity_direction.Normalize();
+        _rigidbody.AddForce(-gravity_direction*gravity_force);
+        
 
+        simulation.Simulate();
         step += 1;
 
+        
         if(alga_remaining == 0 || step >= max_step){
             done = true;
         }
@@ -189,51 +204,81 @@ public class Agent : MonoBehaviour
             reward = -100;
         }
 
-        return new RlResult(reward, done, GetObservation());
+        return new RlResult(reward , done, GetObservation());
     }
 
     public RlReset Reset(){
-        boat_size = 10;
-        float boat_dilate_x = Random.Range(0.7f, 1.3f);
-        float boat_dilate_z = Random.Range(0.7f, 1.3f);
-        boat_size_x = boat_size*boat_dilate_x;
-        boat_size_z = boat_size*boat_dilate_z;
-        boat_size_x -= boat_size_x % alga_resolution;
-        boat_size_z -= boat_size_z % alga_resolution;
-        boat.transform.localScale  = new Vector3(2*boat_size_x, 1, 2*boat_size_z);
+        boat_size = 10.1f;
+        boat_size_x = boat_size * 2;
+        // float boat_dilate_x = Random.Range(0.7f, 1.3f);
+        // float boat_dilate_z = Random.Range(0.7f, 1.3f);
+        // boat_size_x = boat_size*boat_dilate_x;
+        // boat_size_z = boat_size*boat_dilate_z;
+        // boat_size_x -= boat_size_x % alga_resolution;
+        // boat_size_z -= boat_size_z % alga_resolution;
+        // boat.transform.localScale  = new Vector3(2*boat_size_x, 1, 2*boat_size_z);
 
         float res_inverse = 1/(float)alga_resolution;
+
         alga_remaining = 0;
 
         GameObject[] algas = GameObject.FindGameObjectsWithTag("Alga");
         foreach(GameObject alga in algas){
             GameObject.Destroy(alga);
         }
-
-        for (int i = (int) -boat_size_x* alga_resolution; i < (int) boat_size_x*alga_resolution ; i++)
+    
+        float d_theta = res_inverse/boat_size/1.05f;
+        for (int i = (int) -Mathf.Ceil(boat_size_x* alga_resolution); i < (int) Mathf.Ceil(boat_size_x* alga_resolution) ; i++)
         {
-            for (int j = (int) -boat_size_z* alga_resolution; j < (int) boat_size_z * alga_resolution; j++)
+            for (int j = (int) - Mathf.Ceil(boat_size*alga_resolution*Mathf.PI/2 * 1.05f); j < (int) Mathf.Ceil(boat_size*alga_resolution*Mathf.PI/2 * 1.05f); j++)
             {
-                spawn_position = new Vector3(i* res_inverse + res_inverse / 2, 0.03f, j* res_inverse + res_inverse / 2);
+                spawn_position = new Vector3(i* res_inverse + res_inverse / 2, boat_size * Mathf.Cos(d_theta*(j+0.5f)), boat_size * Mathf.Sin(d_theta*(j+0.5f)));
                 spawner = Instantiate(alga_prefab, spawn_position, Quaternion.identity);
-                spawner.transform.localScale = new Vector3(res_inverse, 0.06f, res_inverse);
+                spawner.transform.localScale = new Vector3(res_inverse, 0.2f, res_inverse);
+                spawner.transform.eulerAngles = new Vector3(d_theta*(j+0.5f)*180/Mathf.PI, 0, 0);
+                spawner.tag = "Alga";
+                alga_remaining += 1;
+            }
+        }
+        float d_phi = res_inverse/boat_size/1.05f;
+        float r;
+        for (int i = (int) 0; i < (int) Mathf.Ceil(boat_size*alga_resolution*Mathf.PI/2 * 1.05f) ; i++)
+        {
+            r = i/(Mathf.Ceil(boat_size*alga_resolution*Mathf.PI/2-1))*0.15f + 1.05f;
+            d_theta = res_inverse/(boat_size* Mathf.Cos(d_phi*(i+0.5f)))/r;
+            for (int j = (int) -Mathf.Ceil(boat_size* Mathf.Cos(d_phi*(i+0.5f)) *alga_resolution*Mathf.PI/2 * r); j < (int) Mathf.Ceil(boat_size* Mathf.Cos(d_phi*(i+0.5f)) *alga_resolution*Mathf.PI/2 * r); j++)
+            {
+                spawn_position = new Vector3(boat_size_x + boat_size*Mathf.Sin(d_phi*(i+0.5f)), boat_size* Mathf.Cos(d_phi*(i+0.5f)) * Mathf.Cos(d_theta*(j+0.5f)), boat_size * Mathf.Cos(d_phi*(i+0.5f)) * Mathf.Sin(d_theta*(j+0.5f)));
+                spawner = Instantiate(alga_prefab, spawn_position, Quaternion.identity);
+                spawner.transform.localScale = new Vector3(res_inverse, 0.2f, res_inverse);
+                spawner.transform.eulerAngles = new Vector3(d_theta*(j+0.5f)*180/Mathf.PI, 0, -d_phi*(i+0.5f)*180/Mathf.PI);
+                spawner.tag = "Alga";
+                alga_remaining += 1;
+
+                spawn_position = new Vector3(-boat_size_x - boat_size*Mathf.Sin(d_phi*(i+0.5f)), boat_size* Mathf.Cos(d_phi*(i+0.5f)) * Mathf.Cos(d_theta*(j+0.5f)), boat_size * Mathf.Cos(d_phi*(i+0.5f)) * Mathf.Sin(d_theta*(j+0.5f)));
+                spawner = Instantiate(alga_prefab, spawn_position, Quaternion.identity);
+                spawner.transform.localScale = new Vector3(res_inverse, 0.2f, res_inverse);
+                spawner.transform.eulerAngles = new Vector3(d_theta*(j+0.5f)*180/Mathf.PI, 0, d_phi*(i+0.5f)*180/Mathf.PI);
                 spawner.tag = "Alga";
                 alga_remaining += 1;
             }
         }
 
+        
+
         alga_init_count = alga_remaining;
 
         float init_x = Random.Range(-boat_size_x, boat_size_x);
-        float init_z = Random.Range(-boat_size_z, boat_size_z);
-        this.transform.position = new Vector3(init_x, 0.3f, init_z);
+        float init_theta = Random.Range(-Mathf.PI/2, Mathf.PI/2);
+        this.transform.position = new Vector3(init_x, (boat_size+0.3f)*Mathf.Cos(init_theta), (boat_size+0.3f)*Mathf.Sin(init_theta));
 
-        float init_rotation = Random.Range(0.0f,360.0f);
-        transform.Rotate(new Vector3(0, init_rotation, 0));
+        // float init_rotation = Random.Range(0.0f,360.0f);
+        this.transform.eulerAngles = new Vector3(init_theta*180/Mathf.PI, 0, 0);
         
         done = false;
         step = 0;
 
+        simulation.Simulate();
         return GetResetObservation();
     }
 
@@ -266,8 +311,9 @@ public class Agent : MonoBehaviour
         if(other.gameObject.layer == 6)
         {
             Destroy(other.gameObject);
-            reward += 1;
+            reward += 1 + 1/Mathf.Min(Mathf.Abs(Mathf.Abs(other.transform.position.x)-boat_size_x),Mathf.Abs(Mathf.Abs(other.transform.position.z) - boat_size_z)) ;
             alga_remaining -=1;
         }
+        
     }
 }
