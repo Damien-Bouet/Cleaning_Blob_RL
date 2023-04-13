@@ -3,7 +3,7 @@ from peaceful_pie.unity_comms import UnityComms
 from dataclasses import dataclass
 from gymnasium import Env, spaces
 import numpy as np
-from stable_baselines3.common.env_checker import check_env
+# from stable_baselines3.common.env_checker import check_env
 
 
 # testing testing 123

@@ -25,7 +25,6 @@ class RlResult:
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # -1:cpu, 0:first gpu
 import random
-import gym
 import pylab
 import numpy as np
 import tensorflow as tf
@@ -191,7 +190,7 @@ class PPOAgent:
         
         self.Actor_name = f"{self.env_name}_PPO_Actor.h5"
         self.Critic_name = f"{self.env_name}_PPO_Critic.h5"
-        # self.load();
+        self.load();
 
         
     def act(self, state):
@@ -299,7 +298,7 @@ class PPOAgent:
             except OSError:
                 pass
         # saving best models
-        if self.average_[-1] >= self.max_average:
+        if self.average_[-1] >= self.max_average and self.episode > 5:
             self.max_average = self.average_[-1]
             self.save()
             SAVING = "SAVING"
