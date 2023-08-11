@@ -6,6 +6,12 @@ import numpy as np
 
 from gymnasium import spaces
 
+import warnings
+import dreamerv3
+from dreamerv3 import embodied
+import crafter
+from dreamerv3.embodied.envs import from_gym
+
 from my_env import MyEnv
 
 @dataclass
@@ -155,6 +161,7 @@ class Critic_Model:
         return loss
 
     def predict(self, state):
+        print(state.shape)
         return self.Critic.predict([state/255, np.zeros((state.shape[0], 1))])
 
 tf_writer = tf.summary.create_file_writer("log")
@@ -191,7 +198,7 @@ class PPOAgent:
         
         self.Actor_name = f"{self.env_name}_PPO_Actor.h5"
         self.Critic_name = f"{self.env_name}_PPO_Critic.h5"
-        # self.load();
+        # self.load()
 
         
     def act(self, state):
@@ -303,7 +310,7 @@ class PPOAgent:
             self.max_average = self.average_[-1]
             self.save()
             SAVING = "SAVING"
-            # decreaate learning rate every saved model
+            # decrease learning rate every saved model
             self.lr *= 0.95
             K.set_value(self.Actor.Actor.optimizer.learning_rate, self.lr)
             K.set_value(self.Critic.Critic.optimizer.learning_rate, self.lr)
@@ -350,7 +357,9 @@ class PPOAgent:
     #     self.env.close()
 
     def run_batch(self): # train every self.Training_batch episodes
-        state = self.env.reset()[0]
+        state = self.env.reset()
+        # print(type(state))
+        print(state.shape)
         step = 0
         printing_period = 1
         
@@ -364,7 +373,7 @@ class PPOAgent:
                 action, action_onehot, prediction = self.act(np.expand_dims(state, axis=0))
                 # Retrieve new state, reward, and whether the state is terminal
                 
-                next_state, reward, done, _, _ = self.env.step(action)
+                next_state, reward, done, _ = self.env.step(action)
                 step += 1
                 # Memorize (state, action, reward) for training
                 states[t,:,:,:] = state
@@ -471,7 +480,7 @@ class PPOAgent:
     def test(self, test_episodes = 100):
         self.load()
         for e in range(100):
-            state = self.env.reset()[0]
+            state = self.env.reset()
             state = np.reshape(state, [1, self.state_size[0]])
             done = False
             score = 0
