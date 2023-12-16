@@ -110,8 +110,9 @@ public class Agent : MonoBehaviour
         }
 
         [JsonRpcMethod]
-        void Say(string message){
+        bool Say(string message){
             Debug.Log($"You sent {message}");
+            return true;
         }
 
         [JsonRpcMethod]
@@ -120,8 +121,9 @@ public class Agent : MonoBehaviour
         }
 
         [JsonRpcMethod]
-        void Translate(MyVector3 translate){
+        bool Translate(MyVector3 translate){
             agent.transform.position += translate.AsVector3();
+            return true;
         }
 
         [JsonRpcMethod]
@@ -130,8 +132,9 @@ public class Agent : MonoBehaviour
         }
 
         [JsonRpcMethod]
-        void Gravity(){  //nothing:0, forward:1, backward:2, left:3, right:4
+        bool Gravity(){  //nothing:0, forward:1, backward:2, left:3, right:4
             agent.Gravity();
+            return true;
         }
 
         [JsonRpcMethod]

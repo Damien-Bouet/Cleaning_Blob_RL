@@ -5,8 +5,6 @@ from gymnasium import Env, spaces
 import numpy as np
 from typing import Tuple, List, Dict
 
-from core_module.exceptions import UnityConnectionError
-
 # testing testing 123
 
 class MyVector3:
@@ -96,9 +94,7 @@ class MyEnv(Env):
         - info (dict): Additional information about the step.
         """
         action = int(action)    #We need to use int and not np.int64 givent by spaces.Discrete
-        rl_result : RlResult = self.unity_comms.Step(action=action, ResultClass=RlResult, retry=False)
-        if rl_result is None:
-            raise UnityConnectionError("The Unity connection was closed.")
+        rl_result : RlResult = self.unity_comms.Step(action=action, ResultClass=RlResult)
         info = {"finished":rl_result.done}
         return np.array(rl_result.obs, dtype=np.uint8), rl_result.reward, rl_result.done, False, info
 
@@ -112,9 +108,7 @@ class MyEnv(Env):
         - observation (np.ndarray): The observation after the reset.
         - info (dict): Additional information about the reset.
         """
-        reset_res = self.unity_comms.Reset(ResultClass=RlReset, retry=False)
-        if reset_res is None:
-            raise UnityConnectionError("The Unity connection was closed.")
+        reset_res = self.unity_comms.Reset(ResultClass=RlReset)
         obs = np.array(reset_res.obs, dtype=np.uint8)
         self.total_reward = reset_res.total_reward_available
         return obs, {}

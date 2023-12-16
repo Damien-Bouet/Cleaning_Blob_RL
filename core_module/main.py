@@ -3,7 +3,7 @@ from peaceful_pie.unity_comms import UnityComms
 import numpy as np
 
 import os
-from typing import List, Tuple, Callable, Optional, Union
+from typing import List, Tuple, Callable, Optional
 import pylab
 import numpy as np
 import tensorflow as tf
@@ -61,7 +61,7 @@ class ActorModel:
 
         self.Actor = model
 
-        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer, experimental_run_tf_function=False)
+        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer)
         
     def ppo_loss(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
         """
@@ -135,7 +135,7 @@ class CriticModel:
 
         self.Critic = Model(inputs=[X_input, old_values], outputs = value)
 
-        self.Critic.compile(loss=[self.critic_ppo2_loss(old_values)], optimizer=optimizer, experimental_run_tf_function=False)
+        self.Critic.compile(loss=[self.critic_ppo2_loss(old_values)], optimizer=optimizer)
 
 
     def critic_ppo2_loss(self, values: tf.Tensor) -> Callable[[tf.Tensor, tf.Tensor], tf.Tensor]:
@@ -219,8 +219,8 @@ class PPOAgent:
 
         self.env = env
         self.env_name = "cleaning_blob"
-        self.action_size = self.env.action_space.n
-        self.state_size = self.env.observation_space.shape
+        self.action_size : int = self.env.action_space.n
+        self.state_size : Tuple[int, int, int] = self.env.observation_space.shape
         self.total_episodes = total_episodes # total episodes to train through all environments
         self.episode :int = 0 # used to track the episodes total count of episodes played through all thread environments
         self.step :int = 0
@@ -342,8 +342,8 @@ class PPOAgent:
 
     def get_gaes(
         self,
-        rewards: List[Union[float, int]],
-        dones: List[bool],
+        rewards: np.ndarray,
+        dones: np.ndarray,
         values: np.ndarray,
         next_values: np.ndarray,
         gamma: float = 0.99,
@@ -354,8 +354,8 @@ class PPOAgent:
         Compute Generalized Advantage Estimation (GAE).
 
         Parameters:
-        - rewards (List): The rewards.
-        - dones (List): The done flags.
+        - rewards (np.ndarray): The rewards.
+        - dones (np.ndarray): The done flags.
         - values (np.ndarray): Current state values.
         - next_values (np.ndarray): Next state values.
         - gamma (float): Discount factor.
@@ -366,9 +366,9 @@ class PPOAgent:
         Tuple[np.ndarray, np.ndarray]: Advantages and target values.
         """
         deltas = np.array([r + gamma * (1 - d) * nv - v for (r, d, nv, v) in zip(rewards, dones, next_values, values)])
-        stack_deltas = np.stack(deltas)
-        gaes = copy.deepcopy(stack_deltas)
-        for t in reversed(range(len(stack_deltas) - 1)):
+        deltas = np.stack(deltas)
+        gaes = copy.deepcopy(deltas)
+        for t in reversed(range(len(deltas) - 1)):
             gaes[t] = gaes[t] + (1 - dones[t]) * gamma * lamda * gaes[t + 1]
 
         target = gaes + values
@@ -400,7 +400,10 @@ class PPOAgent:
         Returns:
         None
         """
-      
+        # reshape memory to appropriate shape for training
+        actions = np.vstack(actions)
+        predictions = np.vstack(predictions)
+
         # Get Critic network predictions 
         values = self.critic.predict(states)
         next_values = self.critic.predict(next_states)
@@ -411,7 +414,7 @@ class PPOAgent:
         # stack everything to numpy array
         # pack all advantages, predictions and actions to y_true and when they are received
         # in custom PPO loss function we unpack it
-        y_true = np.hstack([advantages, np.vstack(predictions), np.vstack(actions)])
+        y_true = np.hstack([advantages, predictions, actions])
 
         # training Actor and Critic networks
         a_loss = self.actor.Actor.fit(states/255, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
@@ -509,7 +512,7 @@ class PPOAgent:
         printing_period = 1
         
         previous_time = time.time()
-        done, score, saving = False, 0., ''
+        done, score, saving = False, 0, ''
         while True:
             # Instantiate or reset games memory
             states, next_states, actions, rewards, episode_steps, predictions, dones = np.zeros((self.training_batch,24,32,1)), np.zeros((self.training_batch,24,32,1)), [], [], [], [], []
@@ -560,7 +563,7 @@ class PPOAgent:
         
         self.tensorboard.save_to_csv()
         print("------------------------------------------------------------------------")
-        print(f"Tensorboard saved, create it by running : python -m core_module.fake_tensorboard --path {str(self.log_dir)}")
+        print(f"Tensorboard saved, create it by running : python create_tensorboard.py --path {str(self.log_dir)}")
         print("-----------------------------------------------------------------------")
         # self.env.close()  
 
@@ -580,7 +583,7 @@ class PPOAgent:
             state = self.env.reset()[0]
             
             done = False
-            score = 0.
+            score = 0
             while not done:
                 # self.env.render()
                 prediction = self.actor.predict(np.expand_dims(state, axis=0))[0]
@@ -614,9 +617,10 @@ def run(args: argparse.Namespace) -> None:
         return
     
     unity_comms = UnityComms(port = args.port)
-    if unity_comms.Say(message="The connection is working. The training will start.", ) is None:
+    if unity_comms.Say(message=args.message, retry=False) is not None:
+        print("The connection is working. The training will start.")
+    else:
         raise UnityConnectionError()
-        
     
     my_env = MyEnv(unity_comms=unity_comms)
     agent = PPOAgent(
@@ -645,10 +649,10 @@ if __name__ == "__main__":
     parser.add_argument("--train", type=str2bool, nargs='?', const=True, default=True, help="Train mode - default:True")
     parser.add_argument("--test", type=str2bool, nargs='?', const=True, default=False, help="Test mode - default:False")
 
-    parser.add_argument("--load_model_dir", type=str, default=None, help="Load previous model at the directory - default: None -> No model will be load")
+    parser.add_argument("--load_model_dir", type=str, default=None, help="Load previous model at the directory - default: None => models/dd-mm-YYYY_hh-mm-ss")
     parser.add_argument("--save_model_dir", type=str, default=None, help="Save previous model at the directory - default: None => models/dd-mm-YYYY_hh-mm-ss")
     parser.add_argument("--load_model", type=str2bool, nargs='?', const=True, default=False, help="Load the model during training - default:False")
-    parser.add_argument("--save_model", type=str2bool, nargs='?', const=True, default=True, help="Save the model during training - default:True - save the model every 100 episode and save the one with the best reward averaged on a 50 episodes window")
+    parser.add_argument("--save_model", type=str2bool, nargs='?', const=True, default=True, help="Save the model during training - default:True")
 
     parser.add_argument('--log_dir', type=str, default=None, help='logs directory, to resume a previous training - default:None => logs/train/dd-mm-YYYY_hh-mm-ss')
     parser.add_argument('--episodes', type=int, default=10000, help='Training episodes number - default:10000')
