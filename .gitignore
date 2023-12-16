@@ -1,7 +1,6 @@
 .mypy_cache
 .vscode
 models
-logs
+logs/train
 runs
 __pycache__
-Library
