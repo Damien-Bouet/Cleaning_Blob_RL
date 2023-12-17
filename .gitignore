@@ -4,3 +4,4 @@ models
 logs/train
 runs
 __pycache__
+*.h5
