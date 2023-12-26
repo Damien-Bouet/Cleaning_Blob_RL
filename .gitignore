@@ -1,0 +1,7 @@
+.mypy_cache
+.vscode
+models
+logs/train
+runs
+__pycache__
+*.h5
