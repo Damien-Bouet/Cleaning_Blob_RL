@@ -1,7 +1,7 @@
 
 # Introduction 
 
-This project allow to train a agent with PPO algorithm using a simulated Unity 3D environnement.
+The goal is to automate a robot that cleans boat hulls. The robot is held against the hull by a suction system, and is remotely controlled by an operator, using video feedback. The aim is to use a reinforcement learning algorithm to automate this task, making the robot clean the hull autonomously, thanks only to the video feedback. We will simulate the environment in Unity 3D, and train the agent using PPO algorithm in Python.
 
 
 ![This is a gif](assets/cleaning_blob_demo.gif)
