@@ -3,6 +3,7 @@
 
 The goal is to automate a robot that cleans boat hulls. The robot is held against the hull by a suction system, and is remotely controlled by an operator, using video feedback. The aim is to use a reinforcement learning algorithm to automate this task, making the robot clean the hull autonomously, thanks only to the video feedback. We will simulate the environment in Unity 3D, and train the agent using PPO algorithm in Python.
 
+As we can see just below, we simplified the boat hull with a half-capsule and crated many green squares on its surface to simulate the algae. The agent recieves at each step, the observation of the camera sensor, and the reward of the previous step, corresponding to the number of algae it cleaned. We clearly see that the agent learned by itself to clean the boat in an optimaized way, with a circular motion. (The agent is placed in a random position at the beginning, so it didn't just memorized the path, but really learned to analyse the visiual input)
 
 ![This is a gif](assets/cleaning_blob_demo.gif)
 
